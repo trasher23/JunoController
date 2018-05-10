@@ -210,7 +210,7 @@ void assignAnalogControlCurrentValues() {
       if (control.pin != -1) {
         control.currentAnalogReading = analogRead(control.pin);
         control.previousAnalogReading = control.currentAnalogReading;
-        control.currentValue = handleAnalogControlChange(control, map(control.currentAnalogReading, 0, MAX_ANALOG_READ_VALUE + 1, 0, control.maxValue + 1));
+        control.currentValue = handleAnalogControlChange(control, map(control.currentAnalogReading, 0, MAX_ANALOG_READ_VALUE + 1, 0, control.maxValue));
         control.previousValue = control.currentValue;
         sendSysExc(control);
       }
