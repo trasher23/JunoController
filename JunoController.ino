@@ -5,7 +5,7 @@
   Converted for Alpha Juno 1
 */
 
-#include <MIDI.h>
+#include <MIDI.h> // Using version 4.3 of MIDI library
 #include <Bounce.h>
 #include <LiquidCrystal595.h>
 #include "junoController.h"
@@ -46,6 +46,9 @@ int modPedalParamGroup = -1;
 Bounce vcaHoldButton = Bounce(DIGITAL_INPUT_PIN_VCA_HOLD, BUTTON_DEBOUNCE_DELAY);
 bool vcaHoldActive = false;
 
+//MIDI_CREATE_DEFAULT_INSTANCE();
+MIDI_CREATE_INSTANCE(HardwareSerial, Serial1, MIDI);
+
 void setup() {
   initializePins();
 
@@ -54,7 +57,10 @@ void setup() {
   analogReadAveraging(ANALOG_READ_RESOLUTION);
 
   mapDigitalControlsToPins();
-
+  
+  MIDI.setHandleNoteOn(handleMidiNoteOn);
+  MIDI.setHandleNoteOff(handleMidiNoteOff);
+  MIDI.setHandleControlChange(handleMidiControlChange);
   MIDI.begin(DEFAULT_MIDI_CHANNEL);
 
   initialiseLCD();
@@ -227,6 +233,13 @@ void assignDigitalControlCurrentValues() {
 */
 void readControlDumpButton() {
   if (controlDumpButton.update()) {
+    lcd.setCursor(0, 0);
+    lcd.print("Send Ctrl State");
+    
+    lcd.setCursor(0, 1);
+    lcd.print("                ");
+    delay(1000);
+    
     assignAnalogControlCurrentValues();
     assignDigitalControlCurrentValues();
   }
@@ -235,11 +248,11 @@ void readControlDumpButton() {
 void readModWheelAssignButton() {
   if (modWheelAssignButton.update()) {
     if (modWheelAssignButton.risingEdge()) {
-      Serial.println("Mod wheel assign on");
+      //Serial.println("Mod wheel assign on");
       modWheelParam = -1;
       modWheelAssignActive = true;
     } else {
-      Serial.println("Mod wheel assign off");
+      //Serial.println("Mod wheel assign off");
       modWheelAssignActive = false;
     }
   }
@@ -248,11 +261,11 @@ void readModWheelAssignButton() {
 void readModPedalAssignButton() {
   if (modPedalAssignButton.update()) {
     if (modPedalAssignButton.risingEdge()) {
-      Serial.println("Mod pedal assign on");
+      //Serial.println("Mod pedal assign on");
       modPedalParam = -1;
       modPedalAssignActive = true;
     } else {
-      Serial.println("Mod pedal assign off");
+      //Serial.println("Mod pedal assign off");
       modPedalAssignActive = false;
     }
   }
@@ -293,8 +306,8 @@ void readMultiplexersOnChannel(int channel) {
 
       if (abs(control.currentAnalogReading - control.previousAnalogReading) > control.jitterThreshold) {
         control.previousAnalogReading = control.currentAnalogReading;
-
-        control.currentValue = handleAnalogControlChange(control, map(control.currentAnalogReading, 0, MAX_ANALOG_READ_VALUE + 1, 0, control.maxValue + 1));
+        
+        control.currentValue = handleAnalogControlChange(control, map(control.currentAnalogReading, 0, MAX_ANALOG_READ_VALUE + 1, 0, control.maxValue));
         if (control.currentValue != control.previousValue) {
           control.previousValue = control.currentValue;
           sendSysExc(control);
@@ -379,17 +392,17 @@ void sendSysExc(struct ControlPin& control) {
     modWheelParam = control.param;
     modWheelParamGroup = control.paramGroup;
     createAndSendSysexMessage(PARAM_GROUP_PATCH, PATCH_PARAM_MOD_SENSITIVITY, 0);
-    //      Serial.print("Assigning param ");
-    //      Serial.print(control.param);
-    //      Serial.println(" to mod wheel");
+//          Serial.print("Assigning param ");
+//          Serial.print(control.param);
+//          Serial.println(" to mod wheel");
   }
 
   if (modPedalAssignActive) {
     modPedalParam = control.param;
     modPedalParamGroup = control.paramGroup;
-    //      Serial.print("Assigning param ");
-    //      Serial.print(control.param);
-    //      Serial.println(" to mod pedal");
+//          Serial.print("Assigning param ");
+//          Serial.print(control.param);
+//          Serial.println(" to mod pedal");
   }
 
   if (control.paramGroup == PARAM_GROUP_PATCH && control.param == PATCH_PARAM_PORTAMENTO_TIME) {
@@ -464,53 +477,44 @@ const uint8_t* createSysExMessage(uint8_t group, uint8_t param, uint8_t value) {
   return data;
 }
 
-void readMidiIn() {
-  if (MIDI.read()) {
-    switch (MIDI.getType()) {
+void handleMidiNoteOn(byte channel, byte note, byte velocity) {
+  //Serial.println("Note on");
+  midiLedIndicator.noteOn();
+}
 
-      case ControlChange:
-        midiLedIndicator.cc();
+void handleMidiNoteOff(byte channel, byte note, byte velocity) {
+  //Serial.println("Note off");
+  midiLedIndicator.noteOff();
+}
 
-        //If a parameter is assigned to mod wheel, send sysex to change that value
-        if (MOD_WHEEL_PARAM == MIDI.getData1() && modWheelParam > -1) {
-          createAndSendSysexMessage(modWheelParamGroup, modWheelParam, MIDI.getData2());
-          //If a parameter is assigned to mod pedal, send sysex to change that value
-        } else if (MOD_PEDAL_PARAM == MIDI.getData1() && modPedalParam > -1) {
-          createAndSendSysexMessage(modPedalParamGroup, modPedalParam, MIDI.getData2());
-        } else if (SUSTAIN_PEDAL_PARAM == MIDI.getData1() && vcaHoldActive) {
-
-          int value = MIDI.getData2();
-
-          if (value < 64) {
-            //If sustain off is sent, we want to retrigger the sustain to mimic hold.
-            //To do this properly we would actually not want to send the sustain off message at all, but it's done automatically by the soft thru logic,
-            //and I haven't found a way to filter out certain messages only.
-            sendSustainChange(true);
-          }
-          
-      }
-
-        break;
-
-      case NoteOn:
-        midiLedIndicator.noteOn();
-        break;
-
-      case NoteOff:
-        midiLedIndicator.noteOff();
-        break;
-
-      default:
-        break;
+void handleMidiControlChange(byte channel, byte number, byte value) {
+  //Serial.println("Control Change");
+  midiLedIndicator.cc();
+  //If a parameter is assigned to mod wheel, send sysex to change that value
+  if (MOD_WHEEL_PARAM == number && modWheelParam > -1) {
+    createAndSendSysexMessage(modWheelParamGroup, modWheelParam, value);
+    //If a parameter is assigned to mod pedal, send sysex to change that value
+  } else if (MOD_PEDAL_PARAM == number && modPedalParam > -1) {
+    createAndSendSysexMessage(modPedalParamGroup, modPedalParam, value);
+  } else if (SUSTAIN_PEDAL_PARAM == number && vcaHoldActive) {
+    if (value < 64) {
+      //If sustain off is sent, we want to retrigger the sustain to mimic hold.
+      //To do this properly we would actually not want to send the sustain off message at all, but it's done automatically by the soft thru logic,
+      //and I haven't found a way to filter out certain messages only.
+      sendSustainChange(true);
     }
   }
+}
+
+void readMidiIn() {
+  MIDI.read();
 }
 
 void sendSustainChange(bool on) {
   int value;
 
   if (on) {
-    Serial.println("Sustain Active");
+    //Serial.println("Sustain Active");
     value = 127;
   } else {
     value = 0;
