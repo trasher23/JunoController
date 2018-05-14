@@ -167,7 +167,7 @@ Example:
 
 // Sets analog read resolution to 10-bit (0-1023)
 #define ANALOG_READ_RESOLUTION             	        10
-#define MAX_ANALOG_READ_VALUE                       1023
+#define MAX_ANALOG_READ_VALUE                       1024
 
 #define MUX_CHANNEL_SWITCH_DELAY_IN_MICROSECONDS    100
 #define BUTTON_DEBOUNCE_DELAY                       200

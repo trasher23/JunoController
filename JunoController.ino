@@ -8,8 +8,11 @@
 #include <MIDI.h> // Using version 4.3 of MIDI library
 #include <Bounce.h>
 #include <LiquidCrystal595.h>
+#include <ResponsiveAnalogRead.h> // Improve analog read response
 #include "junoController.h"
 #include "MIDI_LED_indicator.h"
+
+ResponsiveAnalogRead analog(0, false);
 
 // Analog controls are mapped by [multiplexerChannel][pinIndex]
 ControlPin analogControls[NUMBER_OF_MULTIPLEXER_CHANNELS][NUMBER_OF_MULTIPLEXERS];
@@ -46,7 +49,6 @@ int modPedalParamGroup = -1;
 Bounce vcaHoldButton = Bounce(DIGITAL_INPUT_PIN_VCA_HOLD, BUTTON_DEBOUNCE_DELAY);
 bool vcaHoldActive = false;
 
-//MIDI_CREATE_DEFAULT_INSTANCE();
 MIDI_CREATE_INSTANCE(HardwareSerial, Serial1, MIDI);
 
 void setup() {
@@ -55,7 +57,7 @@ void setup() {
   mapAnalogControlsToMultiplexers();
   addJitterThresholdToAnalogControls();
   analogReadAveraging(ANALOG_READ_RESOLUTION);
-
+  
   mapDigitalControlsToPins();
   
   MIDI.setHandleNoteOn(handleMidiNoteOn);
@@ -195,6 +197,7 @@ void addJitterThresholdToAnalogControls() {
     for (int multiplexer = 0; multiplexer < NUMBER_OF_MULTIPLEXERS; multiplexer++) {
       ControlPin& control = analogControls[channel][multiplexer];
       // 1.8 gets it to around 7, which appears to be enough to dial-in each value between 0 and 125 (can't get 127 yet, will work it out eventually) and still prevent jitter
+      // 20180513: Changed to 1
       control.jitterThreshold = (MAX_ANALOG_READ_VALUE * 1.8) / ((control.maxValue + 1) << 1);
     }
   }
@@ -210,7 +213,7 @@ void assignAnalogControlCurrentValues() {
       if (control.pin != -1) {
         control.currentAnalogReading = analogRead(control.pin);
         control.previousAnalogReading = control.currentAnalogReading;
-        control.currentValue = handleAnalogControlChange(control, map(control.currentAnalogReading, 0, MAX_ANALOG_READ_VALUE + 1, 0, control.maxValue));
+        control.currentValue = handleAnalogControlChange(control, map(control.currentAnalogReading, 0, MAX_ANALOG_READ_VALUE + 1, 0, control.maxValue + 1));
         control.previousValue = control.currentValue;
         sendSysExc(control);
       }
@@ -302,13 +305,19 @@ void readMultiplexersOnChannel(int channel) {
 
     // Control Pin {-1} is Null
     if (control.pin != -1) {
-      control.currentAnalogReading = analogRead(control.pin);
-
-      if (abs(control.currentAnalogReading - control.previousAnalogReading) > control.jitterThreshold) {
+      analog.update(analogRead(control.pin));
+      control.currentAnalogReading = analog.getValue();
+      
+      if ((abs(control.currentAnalogReading - control.previousAnalogReading) > control.jitterThreshold) && analog.hasChanged()) {        
         control.previousAnalogReading = control.currentAnalogReading;
-        
+     
         control.currentValue = handleAnalogControlChange(control, map(control.currentAnalogReading, 0, MAX_ANALOG_READ_VALUE + 1, 0, control.maxValue));
+        
         if (control.currentValue != control.previousValue) {
+
+          Serial.println(control.previousValue);
+          Serial.println(control.currentValue);
+        
           control.previousValue = control.currentValue;
           sendSysExc(control);
           updateLCD(control);
